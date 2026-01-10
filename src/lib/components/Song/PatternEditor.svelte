@@ -597,12 +597,16 @@
 		const previewService = services.audioService.getPreviewService(chipIndex);
 		if (!previewService) return;
 
-		// Determine which instrument to use
-		const instrumentIndex = PatternInstrumentContext.getInstrumentForPreview(
+		// Determine which instrument to use (returns 1-based number from pattern)
+		const instrumentNumber = PatternInstrumentContext.getInstrumentForPreview(
 			pattern,
 			selectedRow,
 			channelIndex
 		);
+
+		// Convert instrument number to 0-based array index
+		// Instrument "01" = index 0, "08" = index 7, etc.
+		const instrumentIndex = instrumentNumber > 0 ? instrumentNumber - 1 : 0;
 
 		// Determine which volume to use
 		const volume = PatternInstrumentContext.getVolumeForPreview(
