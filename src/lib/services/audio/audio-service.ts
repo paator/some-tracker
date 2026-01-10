@@ -3,6 +3,7 @@ import type { Chip } from '../../chips/types';
 import type { Table } from '../../models/project';
 import { ChipSettings } from './chip-settings';
 import { channelMuteStore } from '../../stores/channel-mute.svelte';
+import { PreviewNoteService } from './preview-note-service';
 
 export class AudioService {
 	private _audioContext: AudioContext | null = new AudioContext();
@@ -13,6 +14,9 @@ export class AudioService {
 	//for example 1x FM chip processor, 2x AY chip processors for TSFM track
 	//they will all be mixed together in single audio context
 	chipProcessors: ChipProcessor[] = [];
+
+	// Preview note services - one per chip for real-time note preview
+	previewServices: PreviewNoteService[] = [];
 
 	constructor() {
 		// Web browsers like to disable audio contexts when they first exist to prevent auto-play video/audio ads.
@@ -38,7 +42,7 @@ export class AudioService {
 	}
 
 	async addChipProcessor(chip: Chip) {
-		if (!this._audioContext) {
+		if (!this._audioContext || !this._masterGainNode) {
 			throw new Error('Audio context not initialized');
 		}
 
@@ -59,6 +63,11 @@ export class AudioService {
 		const audioNode = this.createAudioNode();
 
 		processor.initialize(wasmBuffer, audioNode);
+
+		// Initialize preview note service for this chip
+		const previewService = new PreviewNoteService(this._audioContext, this._masterGainNode);
+		await previewService.initialize(chip, wasmBuffer);
+		this.previewServices.push(previewService);
 	}
 
 	play() {
@@ -118,6 +127,11 @@ export class AudioService {
 				(chipProcessor as any).sendInitInstruments(instruments);
 			}
 		});
+
+		// Update preview services with new instruments
+		this.previewServices.forEach((previewService) => {
+			previewService.updateInstruments(instruments);
+		});
 	}
 
 	updateSpeed(speed: number) {
@@ -130,6 +144,11 @@ export class AudioService {
 		if (this._isPlaying) {
 			this.stop();
 		}
+
+		// Clean up preview services
+		this.previewServices.forEach((service) => service.destroy());
+		this.previewServices = [];
+
 		this.chipProcessors = [];
 	}
 
@@ -137,6 +156,10 @@ export class AudioService {
 		if (this._isPlaying) {
 			this.stop();
 		}
+
+		// Clean up preview services
+		this.previewServices.forEach((service) => service.destroy());
+		this.previewServices = [];
 
 		if (this._audioContext) {
 			await this._audioContext.close();
@@ -207,5 +230,12 @@ export class AudioService {
 				});
 			}
 		});
+	}
+
+	/**
+	 * Get the preview note service for a specific chip
+	 */
+	getPreviewService(chipIndex: number): PreviewNoteService | null {
+		return this.previewServices[chipIndex] || null;
 	}
 }

@@ -44,6 +44,9 @@
 		PatternKeyboardShortcutsService,
 		type PatternKeyboardShortcutsContext
 	} from '../../services/pattern/pattern-keyboard-shortcuts';
+	import { PatternNoteInput } from '../../services/pattern/editing/pattern-note-input';
+	import { PatternInstrumentContext } from '../../services/pattern/pattern-instrument-context';
+	import { NoteName } from '../../models/song';
 
 	let {
 		patterns = $bindable(),
@@ -581,6 +584,56 @@
 		handleKeyDown(event);
 	}
 
+	function handlePreviewNotePlay(
+		noteName: NoteName,
+		octave: number,
+		pattern: Pattern,
+		channelIndex: number,
+		key: string
+	) {
+		const chipIndex = getChipIndex();
+		if (chipIndex < 0) return;
+
+		const previewService = services.audioService.getPreviewService(chipIndex);
+		if (!previewService) return;
+
+		// Determine which instrument to use
+		const instrumentIndex = PatternInstrumentContext.getInstrumentForPreview(
+			pattern,
+			selectedRow,
+			channelIndex
+		);
+
+		// Determine which volume to use
+		const volume = PatternInstrumentContext.getVolumeForPreview(
+			pattern,
+			selectedRow,
+			channelIndex
+		);
+
+		// Update tuning table if needed (for chips that support it)
+		if (chipProcessor && 'sendInitTuningTable' in chipProcessor) {
+			previewService.updateTuningTable(tuningTable);
+		}
+
+		// Update instruments
+		previewService.updateInstruments(instruments);
+
+		// Play the note
+		previewService.playNote(noteName, octave, instrumentIndex, channelIndex, key, volume);
+	}
+
+	function handleKeyUp(event: KeyboardEvent) {
+		const chipIndex = getChipIndex();
+		if (chipIndex < 0) return;
+
+		const previewService = services.audioService.getPreviewService(chipIndex);
+		if (!previewService) return;
+
+		// Stop the preview note associated with this key
+		previewService.stopNote(event.key);
+	}
+
 	function createShortcutsContext(): PatternKeyboardShortcutsContext {
 		const patternId = patternOrder[currentPatternOrderIndex];
 		const pattern = findOrCreatePattern(patternId);
@@ -706,6 +759,33 @@
 			event.preventDefault();
 			recordPatternEdit(pattern, editingResult.updatedPattern);
 			updatePatternInArray(editingResult.updatedPattern);
+
+			// Play preview note if a note was input and we're in the note field
+			if (fieldInfoBeforeEdit && fieldInfoBeforeEdit.fieldType === 'note') {
+				const mappedNote = PatternNoteInput.mapKeyboardKeyToNote(event.key);
+				if (mappedNote && mappedNote.noteName !== NoteName.OFF) {
+					handlePreviewNotePlay(
+						mappedNote.noteName,
+						mappedNote.octave,
+						pattern,
+						fieldInfoBeforeEdit.channelIndex,
+						event.key
+					);
+				} else if (event.key.toUpperCase() !== 'A') {
+					// Letter notes (C, D, E, F, G, B)
+					const letterNote = PatternNoteInput.getLetterNote(event.key);
+					if (letterNote) {
+						const octave = editorStateStore.get().octave;
+						handlePreviewNotePlay(
+							letterNote,
+							octave,
+							pattern,
+							fieldInfoBeforeEdit.channelIndex,
+							event.key
+						);
+					}
+				}
+			}
 
 			if (editingResult.shouldMoveNext) {
 				moveColumn(1);
@@ -1324,6 +1404,7 @@
 			bind:this={canvas}
 			tabindex="0"
 			onkeydown={handleKeyDown}
+			onkeyup={handleKeyUp}
 			onwheel={handleWheel}
 			onmouseenter={handleMouseEnter}
 			onmouseleave={handleMouseLeave}
